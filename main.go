@@ -83,7 +83,7 @@ func main() {
 
 	cronJob := cron.New()
 
-	_, err = cronJob.AddFunc("10 0 * * *", func() {
+	_, err = cronJob.AddFunc("TZ=Europe/Kiev 10 0 * * *", func() {
 		sendSchedule(os.Getenv("TELEGRAM_BOT_TOKEN"), os.Getenv("CHAT_ID"), addressToSearch, os.Getenv("SCHEDULER_URL"))
 	})
 	if err != nil {
@@ -102,9 +102,14 @@ func main() {
 
 func sendSchedule(botToken string, chatID string, addressToSearch [2]AddressData, schedulerUrl string) {
 	log.Println("Sending schedule")
-	todayDayNumberAtWeek := time.Now().Day()
+	loc, err := time.LoadLocation("Europe/Kiev")
+	if err != nil {
+		log.Panic(err)
+	}
+
+	todayDayNumberAtWeek := time.Now().In(loc).Weekday()
 	schedule := getSchedule()
-	telegramMessage := fmt.Sprintf("График выключений электроэнергии на сегодня, %v:\n", getCurrentDateInUALocale())
+	telegramMessage := fmt.Sprintf("График выключений электроэнергии на сегодня, %v:\n", getCurrentDateInUALocale(loc))
 
 	for _, address := range addressToSearch {
 		groupsFromServer, err := requestGroupNumber(schedulerUrl, address)
@@ -129,7 +134,7 @@ func sendSchedule(botToken string, chatID string, addressToSearch [2]AddressData
 		}
 	}
 
-	err := sendDataToTelegram(botToken, chatID, telegramMessage)
+	err = sendDataToTelegram(botToken, chatID, telegramMessage)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -233,12 +238,7 @@ func getTelegramUrl(botToken string, chatID string, message string) string {
 	return "https://api.telegram.org/bot" + url.QueryEscape(botToken) + "/sendMessage?chat_id=" + url.QueryEscape(chatID) + "&text=" + url.QueryEscape(message)
 }
 
-func getCurrentDateInUALocale() string {
-	loc, err := time.LoadLocation("Europe/Kiev")
-	if err != nil {
-		log.Panic(err)
-	}
-
+func getCurrentDateInUALocale(loc *time.Location) string {
 	now := time.Now().In(loc)
 
 	return dayNumToUADays[int(now.Weekday())] + ", " + strconv.Itoa(int(now.Day())) + " " + engMonthToUA[int(now.Month())] + " " + strconv.Itoa(now.Year())
