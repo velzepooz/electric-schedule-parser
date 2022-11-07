@@ -71,36 +71,44 @@ var engMonthToUA = map[int]string{
 }
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
+	loadEnv()
 
 	var addressToSearch = [2]AddressData{
 		{streetID: os.Getenv("STREET_ID_ONE"), houseNumber: os.Getenv("HOUSE_NUMBER_ONE"), houseNumberToSearch: os.Getenv("HOUSE_NUMBER_TO_SEARCH_ONE"), region: os.Getenv("REGION_ONE"), who: os.Getenv("WHO_ONE")},
 		{streetID: os.Getenv("STREET_ID_TWO"), houseNumber: os.Getenv("HOUSE_NUMBER_TWO"), houseNumberToSearch: os.Getenv("HOUSE_NUMBER_TO_SEARCH_TWO"), region: os.Getenv("REGION_TWO"), who: os.Getenv("WHO_TWO")},
 	}
 
-	cronJob := cron.New()
-
-	_, err = cronJob.AddFunc("TZ=Europe/Kiev 10 0 * * *", func() {
-		sendSchedule(os.Getenv("TELEGRAM_BOT_TOKEN"), os.Getenv("CHAT_ID"), addressToSearch, os.Getenv("SCHEDULER_URL"))
+	startCroneJob("TZ=Europe/Kiev 10 0 * * *", func() {
+		getGroupFromServerAndSendDayScheduleToTelegram(os.Getenv("TELEGRAM_BOT_TOKEN"), os.Getenv("CHAT_ID"), addressToSearch, os.Getenv("SCHEDULER_URL"))
 	})
-	if err != nil {
-		return
-	}
-
-	cronJob.Start()
 
 	log.Println("App is starting...")
 
-	_, err = fmt.Scanln()
+	_, err := fmt.Scanln()
 	if err != nil {
 		return
 	}
 }
 
-func sendSchedule(botToken string, chatID string, addressToSearch [2]AddressData, schedulerUrl string) {
+func loadEnv() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+}
+
+func startCroneJob(pattern string, cb func()) {
+	cronJob := cron.New()
+
+	_, err := cronJob.AddFunc(pattern, cb)
+	if err != nil {
+		return
+	}
+
+	cronJob.Start()
+}
+
+func getGroupFromServerAndSendDayScheduleToTelegram(botToken string, chatID string, addressToSearch [2]AddressData, schedulerUrl string) {
 	log.Println("Sending schedule")
 	loc, err := time.LoadLocation("Europe/Kiev")
 	if err != nil {
@@ -108,7 +116,15 @@ func sendSchedule(botToken string, chatID string, addressToSearch [2]AddressData
 	}
 
 	todayDayNumberAtWeek := time.Now().In(loc).Weekday()
-	schedule := getSchedule()
+
+	/* make day number like at UA */
+	if todayDayNumberAtWeek == 0 {
+		todayDayNumberAtWeek = 6
+	} else {
+		todayDayNumberAtWeek--
+	}
+
+	schedule := loadScheduleData()
 	telegramMessage := fmt.Sprintf("График выключений электроэнергии на сегодня, %v:\n", getCurrentDateInUALocale(loc))
 
 	for _, address := range addressToSearch {
@@ -142,7 +158,13 @@ func sendSchedule(botToken string, chatID string, addressToSearch [2]AddressData
 	log.Println("Schedule sent")
 }
 
-func getSchedule() Schedule {
+func getCurrentDateInUALocale(loc *time.Location) string {
+	now := time.Now().In(loc)
+
+	return dayNumToUADays[int(now.Weekday())] + ", " + strconv.Itoa(int(now.Day())) + " " + engMonthToUA[int(now.Month())] + " " + strconv.Itoa(now.Year())
+}
+
+func loadScheduleData() Schedule {
 	content, err := ioutil.ReadFile("./data/schedule.json")
 
 	var payload Schedule
@@ -158,12 +180,8 @@ func getSchedule() Schedule {
 	return payload
 }
 
-func getScheduleUrl(mainUrl string, region string, streetID string, homeNumber string) string {
-	return mainUrl + "?region=" + region + "&street_id=" + streetID + "&query=" + homeNumber
-}
-
 func requestGroupNumber(schedulerUrl string, addressData AddressData) (groupsFromServer []GroupsFromServer, err error) {
-	res, err := http.Get(getScheduleUrl(schedulerUrl, addressData.region, addressData.streetID, addressData.houseNumberToSearch))
+	res, err := http.Get(getYasnoUrl(schedulerUrl, addressData.region, addressData.streetID, addressData.houseNumberToSearch))
 
 	if err != nil {
 		return nil, err
@@ -186,6 +204,10 @@ func requestGroupNumber(schedulerUrl string, addressData AddressData) (groupsFro
 	}
 
 	return groupsFromServer, nil
+}
+
+func getYasnoUrl(mainUrl string, region string, streetID string, homeNumber string) string {
+	return mainUrl + "?region=" + region + "&street_id=" + streetID + "&query=" + homeNumber
 }
 
 func getGroupNumber(houseNumber string, groups []GroupsFromServer) int {
@@ -236,10 +258,4 @@ func sendDataToTelegram(botToken string, chatID string, messageToTelegram string
 
 func getTelegramUrl(botToken string, chatID string, message string) string {
 	return "https://api.telegram.org/bot" + url.QueryEscape(botToken) + "/sendMessage?chat_id=" + url.QueryEscape(chatID) + "&text=" + url.QueryEscape(message)
-}
-
-func getCurrentDateInUALocale(loc *time.Location) string {
-	now := time.Now().In(loc)
-
-	return dayNumToUADays[int(now.Weekday())] + ", " + strconv.Itoa(int(now.Day())) + " " + engMonthToUA[int(now.Month())] + " " + strconv.Itoa(now.Year())
 }
