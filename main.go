@@ -78,16 +78,18 @@ func main() {
 		{streetID: os.Getenv("STREET_ID_TWO"), houseNumber: os.Getenv("HOUSE_NUMBER_TWO"), houseNumberToSearch: os.Getenv("HOUSE_NUMBER_TO_SEARCH_TWO"), region: os.Getenv("REGION_TWO"), who: os.Getenv("WHO_TWO")},
 	}
 
-	startCroneJob("TZ=Europe/Kiev 10 0 * * *", func() {
-		getGroupFromServerAndSendDayScheduleToTelegram(os.Getenv("TELEGRAM_BOT_TOKEN"), os.Getenv("CHAT_ID"), addressToSearch, os.Getenv("SCHEDULER_URL"))
-	})
+	getGroupFromServerAndSendDayScheduleToTelegram(os.Getenv("TELEGRAM_BOT_TOKEN"), os.Getenv("CHAT_ID"), addressToSearch, os.Getenv("SCHEDULER_URL"))
+
+	//startCroneJob("TZ=Europe/Kiev @every 20s", func() {
+	//	getGroupFromServerAndSendDayScheduleToTelegram(os.Getenv("TELEGRAM_BOT_TOKEN"), os.Getenv("CHAT_ID"), addressToSearch, os.Getenv("SCHEDULER_URL"))
+	//})
 
 	log.Println("App is starting...")
 
-	_, err := fmt.Scanln()
-	if err != nil {
-		return
-	}
+	//_, err := fmt.Scanln()
+	//if err != nil {
+	//	return
+	//}
 }
 
 func loadEnv() {
@@ -116,13 +118,14 @@ func getGroupFromServerAndSendDayScheduleToTelegram(botToken string, chatID stri
 	}
 
 	todayDayNumberAtWeek := time.Now().In(loc).Weekday()
-
+	log.Println("Before ", todayDayNumberAtWeek)
 	/* make day number like at UA */
 	if todayDayNumberAtWeek == 0 {
 		todayDayNumberAtWeek = 6
 	} else {
 		todayDayNumberAtWeek--
 	}
+	log.Println("After ", todayDayNumberAtWeek)
 
 	schedule := loadScheduleData()
 	telegramMessage := fmt.Sprintf("График выключений электроэнергии на сегодня, %v:\n", getCurrentDateInUALocale(loc))
