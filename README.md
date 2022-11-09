@@ -1,1 +1,1 @@
-### Parser for electricity off schedule and sending to Telegram
+### Schedule turn off electricity parser
