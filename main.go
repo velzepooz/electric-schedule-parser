@@ -83,9 +83,7 @@ func main() {
 			},
 		},
 		{
-			//pattern: "TZ=Europe/Kiev 10 0 * * *",
-			pattern: "@every 30s",
-
+			pattern: "TZ=Europe/Kiev 10 0 * * *",
 			handler: func() {
 				dailyParams := GetScheduleAndSendToTelegramParams{
 					startMessage:    "Sending day schedule",
