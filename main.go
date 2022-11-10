@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/joho/godotenv"
 	"log"
-	"os"
 	"strconv"
 	"time"
 )
@@ -34,30 +33,94 @@ var engMonthToUA = map[int]string{
 	12: "декабря",
 }
 
+type GetScheduleAndSendToTelegramParams struct {
+	startMessage           string
+	endMessage             string
+	telegramMessage        string
+	prepareTelegramMessage func(weekSchedule WeekSchedule, who string, loc *time.Location) (telegramMessage string)
+}
+
+type CronJobConfig struct {
+	pattern string
+	handler func()
+}
+
 func main() {
 	loadEnv()
 
-	var addressToSearch = [2]AddressData{
-		{streetName: os.Getenv("STREET_NAME_ONE"), houseNumber: os.Getenv("HOUSE_NUMBER_ONE"), houseNumberToSearch: os.Getenv("HOUSE_NUMBER_TO_SEARCH_ONE"), region: os.Getenv("REGION_ONE"), who: os.Getenv("WHO_ONE")},
-		{streetName: os.Getenv("STREET_NAME_TWO"), houseNumber: os.Getenv("HOUSE_NUMBER_TWO"), houseNumberToSearch: os.Getenv("HOUSE_NUMBER_TO_SEARCH_TWO"), region: os.Getenv("REGION_TWO"), who: os.Getenv("WHO_TWO")},
+	appConfig := GetConfig()
+	cronJobsConfigs := [2]CronJobConfig{
+		{
+			pattern: "TZ=Europe/Kiev 05 0 * * 1",
+			handler: func() {
+				weeklyParams := GetScheduleAndSendToTelegramParams{
+					startMessage:    "Sending week schedule",
+					endMessage:      "Week schedule sent",
+					telegramMessage: fmt.Sprintf("График выключений электроэнергии на неделю, %v\n", getCurrentWeekPeriodInUALocale(appConfig.locale)),
+					prepareTelegramMessage: func(weekSchedule WeekSchedule, who string, loc *time.Location) (telegramMessage string) {
+						telegramMessage += "\n" + who + ":\n"
+
+						for dayNumber, daySchedule := range weekSchedule {
+							/* make day number like at UA */
+							dayNumberUA := dayNumber
+
+							if dayNumberUA == 6 {
+								dayNumberUA = 0
+							} else {
+								dayNumberUA++
+							}
+
+							telegramMessage += "\n" + dayNumToUADays[dayNumberUA] + ":\n"
+							for _, period := range daySchedule {
+								telegramMessage += "\t\t- c " + strconv.Itoa(period.Start) + " до " + strconv.Itoa(period.End) + "\n"
+							}
+						}
+						return telegramMessage
+					},
+				}
+
+				getScheduleAndSendToTelegram(appConfig, weeklyParams)
+			},
+		},
+		{
+			pattern: "TZ=Europe/Kiev 10 0 * * *",
+			handler: func() {
+				dailyParams := GetScheduleAndSendToTelegramParams{
+					startMessage:    "Sending day schedule",
+					endMessage:      "Day schedule sent",
+					telegramMessage: fmt.Sprintf("График выключений электроэнергии на сегодня, %v:\n", getCurrentDateInUALocale(appConfig.locale)),
+					prepareTelegramMessage: func(weekSchedule WeekSchedule, who string, loc *time.Location) (telegramMessage string) {
+						todayDayNumberAtWeek := time.Now().In(loc).Weekday()
+
+						/* make day number like at UA */
+						if todayDayNumberAtWeek == 0 {
+							todayDayNumberAtWeek = 6
+						} else {
+							todayDayNumberAtWeek--
+						}
+
+						todaySchedule := weekSchedule[todayDayNumberAtWeek]
+
+						telegramMessage += "\n" + who + ":\n"
+
+						for _, period := range todaySchedule {
+							telegramMessage += "C " + strconv.Itoa(period.Start) + " до " + strconv.Itoa(period.End) + "\n"
+						}
+
+						return telegramMessage
+					},
+				}
+
+				getScheduleAndSendToTelegram(appConfig, dailyParams)
+			},
+		},
 	}
 
-	loc, err := time.LoadLocation("Europe/Kiev")
-	if err != nil {
-		log.Panic(err)
-	}
-
-	startCroneJob("TZ=Europe/Kiev 05 0 * * 1", func() {
-		getWeekScheduleAndSendToTelegram(os.Getenv("TELEGRAM_BOT_TOKEN"), os.Getenv("CHAT_ID"), addressToSearch, os.Getenv("SCHEDULER_URL"), os.Getenv("STREET_ID_URL"), loc)
-	})
-
-	startCroneJob("TZ=Europe/Kiev 10 0 * * *", func() {
-		getDayScheduleAndSendToTelegram(os.Getenv("TELEGRAM_BOT_TOKEN"), os.Getenv("CHAT_ID"), addressToSearch, os.Getenv("SCHEDULER_URL"), os.Getenv("STREET_ID_URL"), loc)
-	})
+	initCroneJobs(cronJobsConfigs)
 
 	log.Println("App is starting...")
 
-	_, err = fmt.Scanln()
+	_, err := fmt.Scanln()
 	if err != nil {
 		return
 	}
@@ -70,71 +133,20 @@ func loadEnv() {
 	}
 }
 
-func getWeekScheduleAndSendToTelegram(botToken string, chatID string, addressToSearch [2]AddressData, schedulerUrl string, streetIDUrl string, loc *time.Location) {
-	log.Println("Sending week schedule")
-
-	schedule := loadScheduleData()
-	telegramMessage := fmt.Sprintf("График выключений электроэнергии на неделю, %v\n", getCurrentWeekPeriodInUALocale(loc))
-
-	for _, address := range addressToSearch {
-		groupsFromServer, err := requestGroupNumber(schedulerUrl, address, streetIDUrl)
-
-		if err != nil {
-			log.Panic(err)
-		}
-
-		group := getGroupNumber(address.houseNumber, groupsFromServer)
-
-		if group == 0 {
-			log.Fatal("Group not found")
-		}
-
-		weekSchedule := getScheduleInfo(group, &schedule)
-
-		telegramMessage += "\n" + address.who + ":\n"
-
-		for dayNumber, daySchedule := range weekSchedule {
-			/* make day number like at UA */
-			dayNumberUA := dayNumber
-
-			if dayNumberUA == 6 {
-				dayNumberUA = 0
-			} else {
-				dayNumberUA++
-			}
-
-			telegramMessage += "\n" + dayNumToUADays[dayNumberUA] + ":\n"
-			for _, period := range daySchedule {
-				telegramMessage += "\t\t- c " + strconv.Itoa(period.Start) + " до " + strconv.Itoa(period.End) + "\n"
-			}
-		}
+func initCroneJobs(cronJobsConfigs [2]CronJobConfig) {
+	for _, croneJobConfig := range cronJobsConfigs {
+		startCroneJob(croneJobConfig.pattern, croneJobConfig.handler)
 	}
-
-	err := sendDataToTelegram(botToken, chatID, telegramMessage)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	log.Println("Week schedule sent")
 }
 
-func getDayScheduleAndSendToTelegram(botToken string, chatID string, addressToSearch [2]AddressData, schedulerUrl string, streetIDUrl string, loc *time.Location) {
-	log.Println("Sending day schedule")
-
-	todayDayNumberAtWeek := time.Now().In(loc).Weekday()
-
-	/* make day number like at UA */
-	if todayDayNumberAtWeek == 0 {
-		todayDayNumberAtWeek = 6
-	} else {
-		todayDayNumberAtWeek--
-	}
+func getScheduleAndSendToTelegram(config Config, params GetScheduleAndSendToTelegramParams) {
+	log.Println(params.startMessage)
 
 	schedule := loadScheduleData()
-	telegramMessage := fmt.Sprintf("График выключений электроэнергии на сегодня, %v:\n", getCurrentDateInUALocale(loc))
+	telegramMessage := fmt.Sprintf(params.telegramMessage)
 
-	for _, address := range addressToSearch {
-		groupsFromServer, err := requestGroupNumber(schedulerUrl, address, streetIDUrl)
+	for _, address := range config.addressesToSearch {
+		groupsFromServer, err := requestGroupNumber(config.schedulerUrl, address, config.streetIDUrl)
 
 		if err != nil {
 			log.Panic(err)
@@ -147,21 +159,16 @@ func getDayScheduleAndSendToTelegram(botToken string, chatID string, addressToSe
 		}
 
 		weekSchedule := getScheduleInfo(group, &schedule)
-		todaySchedule := weekSchedule[todayDayNumberAtWeek]
 
-		telegramMessage += "\n" + address.who + ":\n"
-
-		for _, period := range todaySchedule {
-			telegramMessage += "C " + strconv.Itoa(period.Start) + " до " + strconv.Itoa(period.End) + "\n"
-		}
+		telegramMessage += params.prepareTelegramMessage(weekSchedule, address.who, config.locale)
 	}
 
-	err := sendDataToTelegram(botToken, chatID, telegramMessage)
+	err := sendDataToTelegram(config.botToken, config.chatID, telegramMessage)
 	if err != nil {
 		log.Panic(err)
 	}
 
-	log.Println("Day schedule sent")
+	log.Println(params.endMessage)
 }
 
 func getCurrentWeekPeriodInUALocale(loc *time.Location) string {
