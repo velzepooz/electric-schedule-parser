@@ -83,7 +83,9 @@ func main() {
 			},
 		},
 		{
-			pattern: "TZ=Europe/Kiev 10 0 * * *",
+			//pattern: "TZ=Europe/Kiev 10 0 * * *",
+			pattern: "@every 30s",
+
 			handler: func() {
 				dailyParams := GetScheduleAndSendToTelegramParams{
 					startMessage:    "Sending day schedule",
@@ -143,7 +145,7 @@ func getScheduleAndSendToTelegram(config Config, params GetScheduleAndSendToTele
 	log.Println(params.startMessage)
 
 	schedule := loadScheduleData()
-	telegramMessage := fmt.Sprintf(params.telegramMessage)
+	telegramMessage := params.telegramMessage
 
 	for _, address := range config.addressesToSearch {
 		groupsFromServer, err := requestGroupNumber(config.schedulerUrl, address, config.streetIDUrl)
