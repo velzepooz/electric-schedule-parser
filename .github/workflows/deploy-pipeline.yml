@@ -1,0 +1,30 @@
+name: Deploy
+
+env:
+  DEPLOY_BRANCH: master
+  REPO_NAME: ${{ github.event.repository.name }}
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.PROD_SERVER_HOST }}
+          username: ${{ secrets.PROD_SERVER_USERNAME }}
+          key: ${{ secrets.PROD_SERVER_KEY }}
+          script: |
+            cd ./${{ env.REPO_NAME }} || exit 1
+            git checkout ${{ env.DEPLOY_BRANCH }}
+            git pull
+            go build .
+            sudo supervisorctl reload
